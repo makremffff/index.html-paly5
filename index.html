@@ -91,6 +91,13 @@
         .close-btn{align-self:flex-end;font-size:14px;cursor:pointer;color:#FFD700}
         @keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.15)}100%{transform:scale(1)}}
         .pop{animation:pop .3s ease}
+
+        /*========= REFERRAL SECTION =========*/
+        .ref-section{display:flex;flex-direction:column;gap:6px;margin:14px 24px 0;font-size:12px;color:#555}
+        .ref-link-box{display:flex;gap:6px}
+        #refLink{flex:1;padding:6px 8px;border:1px solid #ccc;border-radius:6px;background:#fafafa;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #copyRefBtn{padding:6px 10px;border:none;border-radius:6px;background:#00bcd4;color:#fff;font-size:11px;cursor:pointer}
+        .ref-stats{display:flex;justify-content:space-between;margin-top:4px;font-size:11px}
     </style>
 </head>
 <body>
@@ -125,6 +132,19 @@
                     </div>
                 </div>
                 <div class="center-circle" id="mainCircle"><img src="img2.png" alt="center"></div>
+
+                <!-- REFERRAL SECTION -->
+                <div class="ref-section">
+                    <div class="ref-link-box">
+                        <input id="refLink" readonly>
+                        <button id="copyRefBtn">Copy</button>
+                    </div>
+                    <div class="ref-stats">
+                        <span>Invited: <b id="invitedCount">0</b></span>
+                        <span>Ref Points: <b id="refPoints">0</b></span>
+                    </div>
+                </div>
+
                 <div class="bottom-nav">
                     <div class="nav-item" id="taskNav"><div class="nav-icon">📋</div><span class="nav-label">TASK</span></div>
                     <div class="nav-item" id="swapNav"><div class="nav-icon">⇄</div><span class="nav-label">SWAP</span></div>
@@ -446,6 +466,46 @@
             if (timeLeft > 0) { startAutoClick(); startCountdown(); }
             else { autoClickEnabled = false; saveAll(); updateUI(); }
         }
+
+        /*========= REFERRAL SYSTEM =========*/
+        (async function initReferral() {
+            // 1) استخراج البيانات
+            const userID = tg.initDataUnsafe?.user?.id || 999999;
+            const botName = tg.initDataUnsafe?.bot?.username || '';
+            const startParam = tg.initDataUnsafe?.start_param || '';
+            const refID = startParam.startsWith('ref_') ? startParam.slice(4) : '';
+
+            // 2) تسجيل اللاعب
+            try {
+                await callAPI('register', { userID, ref: refID });
+            } catch {}
+
+            // 3) بناء رابط الإحالة
+            const refLink = `https://t.me/${botName}/earn?startapp=ref_${userID}`;
+            const refLinkEl = document.getElementById('refLink');
+            if (refLinkEl) refLinkEl.value = refLink;
+
+            // 4) زر النسخ
+            const copyBtn = document.getElementById('copyRefBtn');
+            if (copyBtn) {
+                copyBtn.onclick = () => {
+                    refLinkEl.select();
+                    document.execCommand('copy');
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+                };
+            }
+
+            // 5) جلب معلومات الإحالات
+            try {
+                const data = await callAPI('getRefInfo', { userID });
+                const refPointsEl = document.getElementById('refPoints');
+                const invitedCountEl = document.getElementById('invitedCount');
+                if (refPointsEl) refPointsEl.textContent = data.points || 0;
+                if (invitedCountEl) invitedCountEl.textContent = data.count || 0;
+            } catch {}
+
+        })();
 
         tg.ready();
     </script>
