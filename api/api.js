@@ -1,137 +1,145 @@
-// ✅ تخزين اللاعبين داخل الذاكرة (Memory Store)
-if (!global.players) global.players = {};
-const players = global.players;
-
-// ✅ إنشاء لاعب إذا غير موجود
-function ensurePlayer(userID) {
-  if (!players[userID]) {
-    players[userID] = {
-      points: 0,
-      invited: [],
-      referrer: null,
-      lastBox: 0,
-      lastBonus: 0
-    };
-  }
-}
+import fs from "fs";
+import path from "path";
 
 export default function handler(req, res) {
-  res.setHeader("Content-Type", "application/json");
+  try {
+    const { action, userID, amount, address, ref } = req.query;
+    if (!action) return res.status(400).json({ error: "Missing action" });
 
-  const { action, userID, amount, address, ref } = req.query;
-  if (!action) return res.status(400).json({ error: "Missing action" });
-  if (userID) ensurePlayer(userID);
+    const filePath = path.join(process.cwd(), "players.json");
 
-  const user = players[userID];
+    // ✅ إنشاء ملف players.json إذا لم يوجد
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, JSON.stringify({}), "utf8");
+    }
 
-  switch (action) {
+    // ✅ قراءة اللاعبين
+    let players = JSON.parse(fs.readFileSync(filePath, "utf8"));
 
-    // ✅ تسجيل لاعب + إحالات
-    case "register":
-      if (ref && players[ref] && ref !== userID) {
-        if (!user.referrer) {
-          user.referrer = ref;
-          players[ref].invited.push(userID);
-          players[ref].points += 500;
+    // ✅ تسجيل اللاعب إذا لم يكن موجود
+    if (userID && !players[userID]) {
+      players[userID] = {
+        points: 0,
+        usdt: 0,
+        ref: null,
+        invited: 0,
+        lastBox: 0,
+        lastBonus: 0,
+      };
+
+      // ✅ نظام الإحالات
+      if (ref && ref !== userID) {
+        if (players[ref]) {
+          players[ref].invited++;
+          players[ref].points += 5000;
         }
+        players[userID].ref = ref;
       }
-      return res.json({
-        success: true,
-        referrer: user.referrer
-      });
 
-    // ✅ بيانات الإحالة
-    case "getRefInfo":
-      return res.json({
-        success: true,
-        invitedCount: user.invited.length,
-        invitedList: user.invited,
-        referrer: user.referrer,
-        points: user.points
-      });
+      fs.writeFileSync(filePath, JSON.stringify(players, null, 2));
+    }
 
-    // ✅ صندوق كل 5 دقائق
-    case "openBox":
-      const now = Date.now();
-      const boxCooldown = 5 * 60 * 1000;
+    // ✅ اللاعب الحالي
+    const p = players[userID];
 
-      if (now - user.lastBox < boxCooldown) {
+    // ✅ الأكشنات
+    switch (action) {
+      // ✅ جلب رصيد اللاعب
+      case "getBalance":
         return res.json({
-          success: false,
-          wait: Math.ceil((boxCooldown - (now - user.lastBox)) / 1000)
+          points: p.points,
+          usdt: p.usdt,
+          invited: p.invited,
+          lastBox: p.lastBox,
+          lastBonus: p.lastBonus,
         });
-      }
 
-      const reward = Math.floor(Math.random() * 100) + 10;
-      user.points += reward;
-      user.lastBox = now;
+      // ✅ فتح صندوق كل 5 دقائق
+      case "openBox":
+        if (Date.now() - p.lastBox < 5 * 60 * 1000) {
+          return res.json({ error: "Wait 5 minutes" });
+        }
 
-      return res.json({ success: true, reward });
+        const rewardBox = Math.floor(Math.random() * (200 - 50 + 1)) + 50;
+        p.points += rewardBox;
+        p.lastBox = Date.now();
+        fs.writeFileSync(filePath, JSON.stringify(players, null, 2));
 
-    // ✅ Bonus كل 12 دقيقة
-    case "bonus":
-      const now2 = Date.now();
-      const bonusCooldown = 12 * 60 * 1000;
+        return res.json({ success: true, reward: rewardBox });
 
-      if (now2 - user.lastBonus < bonusCooldown) {
+      // ✅ بونص كل 12 دقيقة
+      case "bonus":
+        if (Date.now() - p.lastBonus < 12 * 60 * 1000) {
+          return res.json({ error: "Wait 12 minutes" });
+        }
+
+        p.points += 1000;
+        p.lastBonus = Date.now();
+        fs.writeFileSync(filePath, JSON.stringify(players, null, 2));
+
+        return res.json({ success: true, reward: 1000 });
+
+      // ✅ مشاهدة إعلان
+      case "watchAd":
+        p.points += 150;
+        fs.writeFileSync(filePath, JSON.stringify(players, null, 2));
+        return res.json({ success: true, reward: 150 });
+
+      // ✅ إكمال مهمة
+      case "claimTask":
+        p.points += 10000;
+        fs.writeFileSync(filePath, JSON.stringify(players, null, 2));
+        return res.json({ success: true, reward: 10000 });
+
+      // ✅ تحويل نقاط إلى USDT
+      case "swap":
+        const pts = parseInt(amount);
+        if (!pts || pts < 10000)
+          return res.status(400).json({ error: "Min 10,000 points" });
+
+        const usdt = ((pts / 10000) * 0.005).toFixed(3);
+
+        p.points -= pts;
+        p.usdt += Number(usdt);
+        fs.writeFileSync(filePath, JSON.stringify(players, null, 2));
+
+        return res.json({ success: true, usdt });
+
+      // ✅ طلب سحب
+      case "withdraw":
+        if (!amount || !address)
+          return res.status(400).json({ error: "Missing params" });
+
+        const telegramToken =
+          "8222744961:AAE90Eehr8PqldV6oKxIS9Yo9hw69Zi83Us";
+        const chatID = "8447940021";
+
+        const msg = `🚨 New Withdrawal 🚨
+👤 User: ${userID}
+💰 Amount: ${amount} USDT
+📍 Polygon Address: <code>${address}</code>
+✅ Approve: <code>/approve ${address} ${amount}</code>
+❌ Reject: <code>/reject ${address} ${amount}</code>`;
+
+        fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatID,
+            text: msg,
+            parse_mode: "HTML",
+          }),
+        }).catch(() => {});
+
         return res.json({
-          success: false,
-          wait: Math.ceil((bonusCooldown - (now2 - user.lastBonus)) / 1000)
+          success: true,
+          message: "Withdrawal request sent to admin!",
         });
-      }
 
-      const bonusReward = 200;
-      user.points += bonusReward;
-      user.lastBonus = now2;
-
-      return res.json({ success: true, reward: bonusReward });
-
-    // ✅ الرصيد
-    case "getBalance":
-      return res.json({
-        success: true,
-        points: user.points,
-        invited: user.invited.length,
-        usdt: 0
-      });
-
-    // ✅ swap
-    case "swap":
-      const pts = parseInt(amount);
-      if (!pts || pts < 10000)
-        return res.status(400).json({ error: "Min 10000 points" });
-
-      const usdt = ((pts / 10000) * 0.005).toFixed(3);
-      return res.json({ success: true, usdt });
-
-    // ✅ إرسال طلب سحب إلى التلغرام
-    case "withdraw":
-      if (!userID || !amount || !address)
-        return res.status(400).json({ error: "Missing params" });
-
-      const token = "8222744961:AAE90Eehr8PqldV6oKxIS9Yo9hw69Zi83Us";
-      const chatID = "8447940021";
-
-      const msg = `🚨 Withdrawal
-User: ${userID}
-Amount: ${amount} USDT
-Address: ${address}`;
-
-      fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatID,
-          text: msg
-        }),
-      });
-
-      return res.json({
-        success: true,
-        message: "Withdrawal sent!"
-      });
-
-    default:
-      return res.status(400).json({ error: "Invalid action" });
+      default:
+        return res.status(400).json({ error: "Invalid action" });
+    }
+  } catch (e) {
+    return res.status(500).json({ error: "Server crashed", details: e + "" });
   }
 }
