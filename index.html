@@ -273,7 +273,7 @@
         async function callAPI(action, payload = {}) {
             const qs = new URLSearchParams({ action, userID, ...payload }).toString();
             try {
-                const res = await fetch(`/api?${qs}`);
+                const res = await fetch(`/api/api?${qs}`);
                 const data = await res.json();
                 if (!data.success) throw new Error(data.error || 'API error');
                 return data;
